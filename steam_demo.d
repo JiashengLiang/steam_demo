@@ -2,11 +2,16 @@
  * steam.d
  * 
  * Contents:
- * 	 1.IAPWS top class holding all formulation from IAPWS Releases.
- * 	 	1.1 Region2 subclass holding all formulation for region 2 states.
- *		1.2 Region5 subclass holding all formulation for region 5 states.
- *		1.3 Region3 subclass holding all formulation for region 3 states.
- *		1.4 Region1 subclass holding all formulation for region 1 states.   
+ * 	 1.IAPWS formulations for state calculation.
+ * 	 	1.1 Formulations to calculate saturation (p,T) & boundary equation
+ *			for region 2 and 3.
+ *		1.2 IAPWS-Region2 formulation struct.
+ *		1.3 IAPWS-Region3 formulation struct (including (rho,T) basic equations
+ *          and v(p,T) backward equations).
+ *		1.4 IAPWS-Region1 formulation struct.
+ *		1.5 IAPWS-Region5 formulaiton struct.
+ *		1.6 IAPWS base class whose object has all the calculated values
+ *			of state properties.    
  * Author: Jiasheng(Jason) L.
  * Version:
  */
@@ -16,39 +21,7 @@
  import std.stdio;
  import std.math;
 
-//-------------------------------------------------------------------------------
-// PART 1. IAPWS top formulation class
-//-------------------------------------------------------------------------------
-
-class IAPWS{
-/*
-*	Unless specify, otherwise:
-*	Reference:
-*	 Wanger, W., & Kretzschmar, H.(2008). International Steam Tables.
-*	 Berlin, Heidelberg: Springer Berlin Heidelberg.
-*/
-protected:
-	//Thermodynamic properties:
-	double T; /// thermal temperature [K]
-	double p; /// pressure [Pa]
-	double quality; /// vapour quality (1: pure gas) [-] 
-	double u; /// specific internal energy [J/kg]
-	double h; /// specfic enthalpy [J/kg]
-	double s; /// specific entropy [J/K/kg]
-	double v; /// specific volume [m^^3/kg]
-	double rho; /// density [kg/m^^3] 
-	double Cp; /// specific isobaric heat capacity [J/K/kg]
-	double Cv; /// specific isochoric heat capacity [J/kg/K]
-	double a; /// sound speed [m/s]
-	double mu; /// dynamic viscosity [Pa.s]
-	double k; /// thermal conductivity [W/m/K]
-	double alpha_v; /// isobaric cubic expansion coefficient [1/K]
-	double kappa_T; /// isothermal compressibility [1/Pa]
-	
-	// a char representing region of state within IAPWS
-	char region; // e.g. '2': Formulation Region 2 of IAPWS
-	
-	//specific steam constants:
+//specific steam constants:
 /**/immutable double R=461.526; /// gas constant[J/kg/K]
 	immutable double rho_c=322; /// critical density [kg/m^^3]	
 	immutable double T_c=647.096; /// critical thermal temperature [K]
@@ -56,253 +29,42 @@ protected:
 	immutable double k_c=1e-3; /// critical thermal conductivity [W/K/m]
 	immutable double mu_c=1e-6; // critical dynamic viscosity [Pa.s]
 
-	//tables for calculating dynamic viscosity:
-	double[4] table_3_1=[0.167752e-1,0.220462e-1,0.6366564e-2,-0.241605e-2];
-	double[3][21] table_3_2=[/*[I_i,J_i,n_i]*/ [0,0,0.520094],[0,1,0.850895e-1],[0,2,-0.108374e1],[0,3,-0.289555],[1,0,0.222531],/*5*/[1,1,0.999115],[1,2,1.88797],[1,3,0.126613e1],[1,5,0.120573],[2,0,-0.281378], [2,1,-0.906851],[2,2,-0.772479],[2,3,-0.489837],[2,4,-0.25704],[3,0,0.161913], [3,1,0.257399],[4,0,-0.325372e-1],[4,3,0.698452e-1],[5,4,0.872102e-2],[6,3,-0.435673e-2],[6,5,-0.593264e-3] ];
-	
-	//table for calculating k:
-	double[5] table_1=[2.443221E-03,1.323095000E-02,6.770357000E-03,-3.454586000E-03,4.096266000E-04];
-	double[6][5] table_2=[[1.60397357,-0.646013523,0.111443906,0.102997357,-0.0504123634,0.00609859258], [2.33771842,-2.78843778,1.53616167,-0.463045512,0.0832827019,-0.00719201245], [2.19650529,-4.54580785,3.55777244,-1.40944978,0.275418278,-0.0205938816], [-1.21051378,1.60812989,-0.621178141,0.0716373224,0,0], [-2.7203370,4.57586331,-3.18369245,1.1168348,-0.19268305,0.012913842]];
-	double[5][6] table_6=[[6.53786807199516,6.52717759281799,5.35500529896124,1.55225959906681,1.11999926419994], [-5.61149954923348,-6.30816983387575,-3.96415689925446,0.464621290821181,0.595748562571649], [3.39624167361325,8.08379285492595,8.91990208918795,8.93237374861479,9.8895256507892], [-2.27492629730878,-9.82240510197603,-12.033872950579,-11.0321960061126,-10.325505114704], [10.2631854662709,12.1358413791395,9.19494865194302,6.1678099993336,4.66861294457414], [1.97815050331519,-5.54349664571295,-2.16866274479712,-0.965458722086812,-0.503243546373828]];
+//-------------------------------------------------------------------------------
+//PART1.1 Formulations to calculate saturation (p,T) & boundary equation
+//						for region 2 and 3.
+//-------------------------------------------------------------------------------
 
-	//table for calculating saturation pressure and Temperature 
-	double[10] table_2_19=[0.11670521452767e4,-0.72421316703206e6,-0.17073846940092e2,0.1202082470247e5,-0.32325550322333e7,0.1491510861353e2,-0.48232657361591e4,0.40511340542057e6,-0.23855557567849,0.65017534844798e3];
+//table for calculating saturation pressure and Temperature 
+double[10] table_2_19=[0.11670521452767e4,-0.72421316703206e6,-0.17073846940092e2,0.1202082470247e5,-0.32325550322333e7,0.1491510861353e2,-0.48232657361591e4,0.40511340542057e6,-0.23855557567849,0.65017534844798e3];
 
-private:
-	//determine which region the input (p,T) lies in
-	void set_region(){
-
-		//(p,T) lies in region 2
-		if(((0<T)&&(T<623.15))&&(p<=get_ps)||((623.15<=T&&T<=863.15)
-			&&(get_pb23>p))||((863.15<=T)&&(T<=1073.15))){
-			region = '2';
-	} 
-		//(p,T) lies in region 5
-		else if(1073.15<=T){
-			region = '5';
-		}
-		//(p,T) lies in region 3
-		else if((623.15<=T&&T<=863.15)&&(get_pb23<=p)){
-			region = '3';
-		}
-		//(p,T) lies in region 1
-		else if((273.15<=T&&T<=623.15)&&(get_ps<=p&&p<=100E6)){
-			region = '1';
-		}
-	}
-	void update_thermo(){
-		set_region;
-		//initialise an object of the corresponding region class 
-		//and proceed the calculation within that class
-		final switch (region) {
-			
-			case '2':
-			Region2 _IAPWS = new Region2(p,T,quality);
-			u = _IAPWS.u;
-			h = _IAPWS.h;
-			s = _IAPWS.s;
-			v = _IAPWS.v;
-			rho = _IAPWS.rho;
-			Cp = _IAPWS.Cp; 
-			Cv = _IAPWS.Cv; 
-			a = _IAPWS.a; 
-			mu = _IAPWS.mu;
-			k = _IAPWS.k;
-			alpha_v = _IAPWS.alpha_v;
-			kappa_T = _IAPWS.kappa_T;
-			break;	 
-			
-			case '5':
-			Region5 _IAPWS = new Region5(p,T,quality);
-			u = _IAPWS.u;
-			h = _IAPWS.h;
-			s = _IAPWS.s;
-			v = _IAPWS.v;
-			rho = _IAPWS.rho;
-			Cp = _IAPWS.Cp; 
-			Cv = _IAPWS.Cv; 
-			a = _IAPWS.a; 
-			alpha_v = _IAPWS.alpha_v;
-			kappa_T = _IAPWS.kappa_T;
-			mu = _IAPWS.mu;
-			k = _IAPWS.k;
-			break;
-			
-			case '3':
-			Region3 _IAPWS = new Region3(p,T,quality);
-			u = _IAPWS.u;
-			h = _IAPWS.h;
-			s = _IAPWS.s;
-			v = _IAPWS.v;
-			rho = _IAPWS.rho;
-			Cp = _IAPWS.Cp; 
-			Cv = _IAPWS.Cv; 
-			a = _IAPWS.a; 
-			mu = _IAPWS.mu;
-			k = _IAPWS.k;
-			alpha_v = _IAPWS.alpha_v;
-			kappa_T = _IAPWS.kappa_T;
-			break;
-
-			case '1':
-			Region1 _IAPWS = new Region1(p,T,quality);
-			u = _IAPWS.u;
-			h = _IAPWS.h;
-			s = _IAPWS.s;
-			v = _IAPWS.v;
-			rho = _IAPWS.rho;
-			Cp = _IAPWS.Cp; 
-			Cv = _IAPWS.Cv; 
-			a = _IAPWS.a; 
-			alpha_v = _IAPWS.alpha_v;
-			kappa_T = _IAPWS.kappa_T;
-			mu = _IAPWS.mu;
-			k = _IAPWS.k;
-			break;
-		}
-	}
-
-public:
-	this(double _p, double _T, double _quality){
-		T = _T;p=_p;quality=_quality;
-	}
-
-	~this(){}
-
-	//function introduced to compute dynamic viscosity but not in IAPWS-IF97
-	double DynamicViscosity(){	
-		//intermediate properties
-		double delta=rho/rho_c;
-		double theta=T/T_c;
-		double psi_0,psi_1;
-		double sum=0;
-		
-		//eqn 3.2
-		for(int i=0;i<4;++i){
-			sum += table_3_1[i]*theta^^(-i);
-		}
-		psi_0 = theta^^0.5*(sum)^^-1;
-
-		//eqn 3.3
-		sum=0;
-		for(int i=0;i<21;++i){
-			sum += table_3_2[i][2]*(delta-1)^^(table_3_2[i][0])
-			*((theta^^-1-1)^^(table_3_2[i][1])); 
-		}
-		psi_1 = exp(delta*sum);
-
-		//eqn 3.1
-		mu = 1e-6*psi_0*psi_1;
-		return  mu;
-	}
-	
-	double ThermalConductivity(){
-	/*	
-	* contains everything implementing from IAPWS R15-11 for industrial use
-	* reference:
-	* 	IAPWS (2011). Release on the IAPWS Formulaiton 2011 for the Thermal 
-	*	Conductivity of Ordinary Water Substance,
-	* 	available at the IAPWS website http://www.iapws.org 
-	* 
-	* notice:  value of p, T, rho and mu is required to proceed this function;
-	*/
-	
-		//intermediate properties
-		double lambda_bar,lambda_0,lambda_1,lambda_2,dvdp_T,drhodp_T,zeta_T,
-		zeta_TR,xi,delta_x, y, Z;
-		///eqn 7 ~ eqn 13
-		double T_bar = T/T_c;
-		double p_bar = p/p_c;
-		double rho_bar = rho/rho_c;
-		double mu_bar = mu/mu_c;
-		double Cp_bar = Cp/R;
-		double kappa = Cp/Cv; 
-		///dummy sum container	
-		double sum=0;
-		double sum_1=0;
-
-		//eqn 16
-		for(int i=0;i<5;++i){sum += table_1[i]/(T_bar^^i);} 
-			lambda_0 = sqrt(T_bar)/sum;
-		//eqn 17
-		sum=0;
-		for(int i=0;i<5;++i){
-			for(int j=0;j<6;++j){sum_1 += table_2[i][j]*(rho_bar-1)^^j;}
-				sum += ((T_bar^^-1-1)^^i)*sum_1;sum_1=0;}
-			lambda_1 = exp(rho_bar*sum);	
-
-		/*
-		*lambda_2, critical enhancement of thermal conductivity
-		*	refer to http://www.twt.mpei.ac.ru/mcs/worksheets/iapws/wspTCPT.xmcd	
-		*	for more details
-		*/
-		if((Cp_bar<0)||(Cp_bar>1e13)){
-			Cp_bar = 1e13;Cp = Cp_bar*R;kappa = Cp/Cv;
-		}	
-		dvdp_T = -kappa_T*v;
-		drhodp_T = rho^^2*-dvdp_T; 
-		zeta_T = drhodp_T*p_c/rho_c;
-		///eqn 26
-		int _j=-1;
-		do{
-			if(rho_bar<=0.310559006){_j=0;}
-			if((0.310559006<rho_bar)&&(rho_bar<=0.776397516)){_j=1;}
-			if((0.776397516<rho_bar)&&(rho_bar<=1.242236025)){_j=2;}
-			if((1.242236025<rho_bar)&&(rho_bar<=1.863354037)){_j=3;}
-			if(rho_bar>1.863354037){_j=4;}
-			}while(_j==-1);
-			sum=0;for(int i=0;i<6;++i){sum += table_6[i][_j]*rho_bar^^i;}
-			zeta_TR = 1/sum; 
-		///eqn 23
-		delta_x = rho_bar*(zeta_T-zeta_TR*1.5/T_bar); 
-		if(delta_x<0){delta_x=0;}
-		///eqn 22
-		xi = 0.13*(delta_x/0.06)^^(0.63/1.239); 
-		if((xi<0)||(xi>1e13)){xi=1e13;}
-		///eqn 20
-		y = xi/0.4;
-		///eqn 19
-		if(y<1.2e-7){Z = 0;}
-		else{Z = (2/PI/y)*((1-1/kappa)*atan(y)+y/kappa
-			-(1-exp(-1/(1/y+y^^2/3/(rho_bar^^2)))));}
-		///eqn 18 
-		lambda_2 = 177.8514*rho_bar*Cp_bar*T_bar*Z/mu_bar;
-		
-		//eqn 15
-		lambda_bar = lambda_0*lambda_1+lambda_2;
-		//eqn 10
-		k = lambda_bar * k_c;
-		return k;
-	}  
-
-	double get_pb23(){
-	/*
-	*	calculate boundary value of pressre with a given temperature using eqn 2.1 
-	*	and the coefficients inf table 2.1.
-	*/
+double get_pb23(double T){
+/*
+*	calculate boundary value of pressre with a given temperature using eqn 2.1 
+*	and the coefficients inf table 2.1.
+*/
 
 	return 1e6*(0.34805185628969e3-0.11671859879975e1*T
 		+0.10192970039326e-2*T^^2);
 } 
-double get_ps(){
-	/*
-	*	calculate saturation pressure with a given temperature using eqn 2.12b,
-	* 	eqn 2.13 and the coefficients in table 2.19.
-	*/
-		//initialise intermediate properties 
-		double vartheta = T+table_2_19[8]/(T-table_2_19[9]);
-		double A = vartheta^^2+table_2_19[0]*vartheta+table_2_19[1];
-		double B = table_2_19[2]*vartheta^^2+table_2_19[3]*vartheta
-		+table_2_19[4];
-		double C = table_2_19[5]*vartheta^^2+table_2_19[6]*vartheta
-		+table_2_19[7];
-		return 1e6*(2*C/(-1*B+(B^^2-4*A*C)^^0.5))^^4;
-	}
-	double get_Ts(){
-	/*
-	*	calculate saturation Temperature with a given pressure using eqn 2.12a, 
-	*	eqn 2.14 and the coefficients in table 2.19
-	*/	
+double get_ps(double T){
+/*
+*	calculate saturation pressure with a given temperature using eqn 2.12b,
+* 	eqn 2.13 and the coefficients in table 2.19.
+*/
+	//initialise intermediate properties 
+	double vartheta = T+table_2_19[8]/(T-table_2_19[9]);
+	double A = vartheta^^2+table_2_19[0]*vartheta+table_2_19[1];
+	double B = table_2_19[2]*vartheta^^2+table_2_19[3]*vartheta
+				+table_2_19[4];
+	double C = table_2_19[5]*vartheta^^2+table_2_19[6]*vartheta
+				+table_2_19[7];
+	return 1e6*(2*C/(-1*B+(B^^2-4*A*C)^^0.5))^^4;
+}
+double get_Ts(double p){
+/*
+*	calculate saturation Temperature with a given pressure using eqn 2.12a, 
+*	eqn 2.14 and the coefficients in table 2.19
+*/	
 	double _beta = (p/1e6)^^0.25;
 	double E = _beta^^2+table_2_19[2]*_beta+table_2_19[5];
 	double F = table_2_19[0]*_beta^^2+table_2_19[3]*_beta+table_2_19[6];
@@ -312,13 +74,14 @@ double get_ps(){
 		+table_2_19[9]*D))^^0.5)/2;
 }
 
-} // end class IAPWS
-
 //---------------------------------------------------------------------------------
-//PART 1.1. Region2 sub formulation class
+//PART 1.2. IAPWS-Region2 formulation struct
 //---------------------------------------------------------------------------------	
-class Region2: IAPWS{
-private:	
+struct Region2{
+private:
+	//state properties
+	double p,T;	//pressure & temperature
+	double quality=1.0; //default value for vapor quality 
 	//intermediate properties
 	double g,gamma_o,gamma_r,pi,tau; 
 	//derivatives of intermediate properties
@@ -333,20 +96,10 @@ private:
 	double[3][13] table_2_12=[/*[I_i,J_i,n_i]*/ [1,0,-0.73362260186506e-02], [1,2,-0.88223831943146e-01], [1,5,-0.72334555213245e-01], [1,11,-0.40813178534455e-02], [2,1,0.20097803380207e-02], [2,7,-0.53045921898642e-01], [2,16,-0.76190409086970e-02], [3,4,-0.63498037657313e-02], [3,16,-0.86043093028588e-01], [4,7,0.75321581522770e-02], [4,10,-0.79238375446139e-02], [5,9,-0.22888160778447e-03], [5,10,-0.26456501482810e-02] ];
 	
 	this(double _p, double _T, double _quality){
-		super(_p,_T,_quality);
+		p = _p;
+		T = _T;
+		quality = _quality;
 		init;
-		SpecificVolume; 
-		SpecificEnthalpy; 
-		rho=1/v; 
-		SpecificInternalEnergy;
-		SpecificEntropy; 
-		SpecificIsobaricHeatCapacity; 
-		SpecificIsohoricHeatCapacity;
-		SoundSpeed; 
-		IsobaricCubicExpansionCoefficient;
-		IsothermalCompressibility; 
-		DynamicViscosity;
-		ThermalConductivity;
 	}
 
 	void init(){
@@ -476,59 +229,50 @@ private:
 public:
 	//table 2.8, relations of thermodynamic properties to gamma_o and gamma_r 
 	double SpecificVolume(){
-		v = (pi*(gamma_o_pi+gamma_r_pi))*R*T/p;
-		return v;
+		return (pi*(gamma_o_pi+gamma_r_pi))*R*T/p;
 	} 
 	double SpecificEnthalpy(){
-		h = tau*(gamma_o_tau + gamma_r_tau)*R*T;
-		return h;
+		return tau*(gamma_o_tau + gamma_r_tau)*R*T;
 	}  
 	double SpecificInternalEnergy(){
-		u = SpecificEnthalpy - SpecificVolume*p;
-		return u;
+		return SpecificEnthalpy - SpecificVolume*p;
 	} 
 	double SpecificEntropy(){
-		s = SpecificEnthalpy/T - (gamma_o+gamma_r)*R;
-		return s;
+		return SpecificEnthalpy/T - (gamma_o+gamma_r)*R;
 	}  
 	double SpecificIsobaricHeatCapacity(){
-		Cp = -(tau^^2)*(gamma_o_tautau+gamma_r_tautau)*R;
-		return Cp;
+		return -(tau^^2)*(gamma_o_tautau+gamma_r_tautau)*R;
 	} 
 	double SpecificIsohoricHeatCapacity(){
-		Cv = SpecificIsobaricHeatCapacity
+		return SpecificIsobaricHeatCapacity
 		-(((1+pi*gamma_r_pi-tau*pi*gamma_r_pitau)^^2)/(1-pi^^2*gamma_r_pipi))*R;
-		return Cv;
 	}
 	double SoundSpeed(){
-		double _a;
-		double _b;
-		double _c;
-		double _d;
+		double _a,_b,_c,_d;
 		_a = 1+2*pi*gamma_r_pi+pi^^2*gamma_r_pi^^2;
 		_b = 1-pi^^2*gamma_r_pipi;
 		_c = (1+pi*gamma_r_pi-tau*pi*gamma_r_pitau)^^2;
 		_d = tau^^2*(gamma_o_tautau+gamma_r_tautau);
-		a = sqrt((_a/(_b+(_c/_d)))*R*T);
-		return a;
+		return sqrt((_a/(_b+(_c/_d)))*R*T);
 	} 	
 	double IsobaricCubicExpansionCoefficient(){
-		alpha_v = (1+pi*gamma_r_pi - tau*pi*gamma_r_pitau)
+		return (1+pi*gamma_r_pi - tau*pi*gamma_r_pitau)
 		/(1+pi*gamma_r_pi)/T;
-		return alpha_v;
 	}
 	double IsothermalCompressibility(){
-		kappa_T = (1-pi^^2*gamma_r_pipi)/(1+pi*gamma_r_pi)/p;
-		return kappa_T;
+		return (1-pi^^2*gamma_r_pipi)/(1+pi*gamma_r_pi)/p;
 	}
-} // end class Region2
+} // end struct Region2
 
 //----------------------------------------------------------------------------------------
-//PART 1.2. Region5 sub formulation class
+//PART 1.3. IAPWS-Region5 formulation struct
 //----------------------------------------------------------------------------------------
 
-class Region5: IAPWS{
+struct Region5{
 private:
+	//state property
+	double p,T; //pressure & temperature 
+	double quality = 1.0; //default value of vapour fraction
 	//intermediate properties
 	double gamma_o,gamma_r,pi,tau; 
 	//derivatives of intermediate properties
@@ -542,20 +286,9 @@ private:
 	double[3][6] table_2_23=[/*[I_i,J_i,n_i]*/ [1,1,0.15736404855259e-2], [1,2,0.90153761673944e-3], [1,3,-0.50270077677648e-2], [2,3,0.22440037409485e-5], [2,9,-0.41163275453471e-5], [3,7,0.37919454822955e-7] ];
 	
 	this(double _p, double _T, double _quality){
-	super(_p,_T,_quality);
+	p = _p;
+	T = _T;
 	init;
-	SpecificVolume; 
-	SpecificEnthalpy; 
-	rho=1/v; 
-	SpecificInternalEnergy;
-	SpecificEntropy; 
-	SpecificIsobaricHeatCapacity; 
-	SpecificIsohoricHeatCapacity;
-	SoundSpeed; 
-	IsobaricCubicExpansionCoefficient;
-	IsothermalCompressibility; 
-	DynamicViscosity;
-	ThermalConductivity;
 	}
 
 	void init(){
@@ -618,35 +351,28 @@ private:
 	gamma_r_tautau = sum_tautau;
 	gamma_r_pipi = sum_pipi;
 	gamma_r_pitau = sum_pitau;
-
-	}
+	}// end init()
 
 public:
 	//table 2.24 
 	double SpecificVolume(){
-		v = (pi*(gamma_o_pi+gamma_r_pi))*R*T/p;
-		return v;
+		return (pi*(gamma_o_pi+gamma_r_pi))*R*T/p;
 	} 
 	double SpecificEnthalpy(){
-		h = tau*(gamma_o_tau + gamma_r_tau)*R*T;
-		return h;
+		return tau*(gamma_o_tau + gamma_r_tau)*R*T;
 	}  
 	double SpecificInternalEnergy(){
-		u = SpecificEnthalpy - SpecificVolume*p;
-		return u;
+		return SpecificEnthalpy - SpecificVolume*p;
 	} 
 	double SpecificEntropy(){
-		s = SpecificEnthalpy/T - (gamma_o+gamma_r)*R;
-		return s;
+		return SpecificEnthalpy/T - (gamma_o+gamma_r)*R;
 	}  
 	double SpecificIsobaricHeatCapacity(){
-		Cp = -(tau^^2)*(gamma_o_tautau+gamma_r_tautau)*R;
-		return Cp;
+		return -(tau^^2)*(gamma_o_tautau+gamma_r_tautau)*R;
 	} 
 	double SpecificIsohoricHeatCapacity(){
-		Cv = SpecificIsobaricHeatCapacity
+		return SpecificIsobaricHeatCapacity
 		-(((1+pi*gamma_r_pi-tau*pi*gamma_r_pitau)^^2)/(1-pi^^2*gamma_r_pipi))*R;
-		return Cv;
 	}
 	double SoundSpeed(){
 		double _a,_b,_c,_d;
@@ -654,25 +380,24 @@ public:
 		_b = 1-pi^^2*gamma_r_pipi;
 		_c = (1+pi*gamma_r_pi-tau*pi*gamma_r_pitau)^^2;
 		_d = tau^^2*(gamma_o_tautau+gamma_r_tautau);
-		a = sqrt((_a/(_b+(_c/_d)))*R*T);
-		return a;
+		return sqrt((_a/(_b+(_c/_d)))*R*T);
 	}
 	double IsobaricCubicExpansionCoefficient(){
-		alpha_v = (1+pi*gamma_r_pi - tau*pi*gamma_r_pitau)
+		return (1+pi*gamma_r_pi - tau*pi*gamma_r_pitau)
 		/(1+pi*gamma_r_pi)/T;
-		return alpha_v;
 	}
 	double IsothermalCompressibility(){
-		kappa_T = (1-pi^^2*gamma_r_pipi)/(1+pi*gamma_r_pi)/p;
-		return kappa_T;
+		return (1-pi^^2*gamma_r_pipi)/(1+pi*gamma_r_pi)/p;
 	}
-}//end class Region5
+}//end struct Region5
 
 //----------------------------------------------------------------------------------------------------
-//PART 1.3. Region3 sub formulation class  
+//PART 1.4. IAPWS-Region3 formulation struct  
 //----------------------------------------------------------------------------------------------------
-class Region3 : IAPWS{
+struct Region3{
 private:
+	//state property
+	double p,T,quality,v,rho; // pressure, temperature, vapour fraction, specific volume, density 
 	//(Region3 basic equation)
 		//intermediate properties
 		double delta,tau;
@@ -794,7 +519,7 @@ private:
 		
 		else if(
 			((19.00881189e6<p && p<=40e6)&&T<= eqn_2_65(1))||
-			((16.52916425e6<p && p<=19.00881189e6)&&T<=get_Ts)
+			((16.52916425e6<p && p<=19.00881189e6)&&T<=get_Ts(p))
 			)
 			{SubRegion = 'c';}
 
@@ -839,18 +564,18 @@ private:
 			{SubRegion = 'q';}
 		else if(
 			(21.04336732e6<p && p<=22.5e6) && (eqn_2_65(8)<T && T<=eqn_2_65(4))
-			||((20.5e6<p && p<=21.04336732e6) && (get_Ts<T && T<=eqn_2_65(4))))
+			||((20.5e6<p && p<=21.04336732e6) && (get_Ts(p)<T && T<=eqn_2_65(4))))
 			{SubRegion = 'r';}
 		else if((19.00881189e6<p && p<=21.04336732e6) && (eqn_2_65(1)<T 
-			&& T<= get_Ts))
+			&& T<= get_Ts(p)))
 			{SubRegion = 's';}
-		else if((16.52916425e6<p && p<=20.5e6)&&T>get_Ts)
+		else if((16.52916425e6<p && p<=20.5e6)&&T>get_Ts(p))
 			{SubRegion = 't';}
 
 		//table 2.127, determine region 3u~3z
 		else if(p<=p_c)
 		{
-			if(21.93161551e6<p && T<=get_Ts)
+			if(21.93161551e6<p && T<=get_Ts(p))
 			{
 				if(eqn_2_65(7)<T && T<=eqn_2_65(9))
 					{SubRegion = 'u';quality=0;}
@@ -858,10 +583,10 @@ private:
 					{SubRegion = 'y';quality=0;}
 			}
 			else if((21.04336732e6<p && p<=21.93161551e6) && T>eqn_2_65(7)
-				 && T<=get_Ts)
+				 && T<=get_Ts(p))
 				{SubRegion ='u';quality=0;}
 			
-			else if(21.90096265e6<p && T>=get_Ts)
+			else if(21.90096265e6<p && T>=get_Ts(p))
 			{
 				if(T<=eqn_2_66(10))
 					{SubRegion = 'z';}
@@ -870,7 +595,7 @@ private:
 			}
 			
 			else if((21.04336732e6<p && p<=21.90096265e6) && T<=eqn_2_65(8) 
-					&& T>=get_Ts)
+					&& T>=get_Ts(p))
 				{SubRegion = 'x';}
 		}
 		
@@ -902,18 +627,8 @@ private:
 	
 	this(double _p, double _T , double _quality)
 	{	
-	super(_p,_T,_quality);
-	init;
-	SpecificEnthalpy;
-	SpecificInternalEnergy;
-	SpecificEntropy;
-	SpecificIsobaricHeatCapacity;
-	SpecificIsohoricHeatCapacity;
-	SoundSpeed;
-	IsobaricCubicExpansionCoefficient;
-	IsothermalCompressibility;
-	DynamicViscosity;
-	ThermalConductivity;	
+	p = _p; T = _T; quality = _quality;
+	init;	
 	}
 
 	void init()
@@ -972,48 +687,44 @@ private:
 
 
 public:
+	double SpecificVolume(){return v;}
 	//(Region3 basic equation)table 2.16
 	double SpecificEnthalpy(){
-		h = R*T*(tau*phi_tau+delta*phi_delta);
-		return h;
+		return R*T*(tau*phi_tau+delta*phi_delta);
 	}
 	double SpecificInternalEnergy(){
-		u = R*T*(tau*phi_tau);
-		return u;
+		return R*T*(tau*phi_tau);
 	}
 	double SpecificEntropy(){
-		s = R*(tau*phi_tau-phi);
-		return s;
+		return R*(tau*phi_tau-phi);
 	}
 	double SpecificIsobaricHeatCapacity(){
-		Cp = R*(-tau^^2*phi_tautau+((delta*phi_delta-delta*tau*phi_deltatau)^^2)
+		return R*(-tau^^2*phi_tautau+((delta*phi_delta-delta*tau*phi_deltatau)^^2)
 			/(2*delta*phi_delta+delta^^2*phi_deltadelta));
-		return Cp;
 	}
 	double SpecificIsohoricHeatCapacity(){
-		Cv = R*(-tau^^2*phi_tautau);
-		return Cv;
+		return R*(-tau^^2*phi_tautau);
 	}
 	double SoundSpeed(){
-		a =sqrt(R*T*(2*delta*phi_delta+delta^^2*phi_deltadelta
+		return sqrt(R*T*(2*delta*phi_delta+delta^^2*phi_deltadelta
 			-((delta*phi_delta-delta*tau*phi_deltatau)^^2)/(tau^^2*phi_tautau)));
-		return a;
 	}
 	double IsobaricCubicExpansionCoefficient(){
-		alpha_v = (phi_delta-tau*phi_deltatau)/(2*phi_delta+delta*phi_deltadelta)/T;
-		return alpha_v;
+		return (phi_delta-tau*phi_deltatau)/(2*phi_delta+delta*phi_deltadelta)/T;
 	}
 	double IsothermalCompressibility(){
-		kappa_T = (1/(2*delta*phi_delta+delta^^2*phi_deltadelta))/(rho*R*T);
-		return kappa_T;
+		return (1/(2*delta*phi_delta+delta^^2*phi_deltadelta))/(rho*R*T);
 	}
-}//end class Region3
+}//end struct Region3
 
 //---------------------------------------------------------------------------------
-//PART 1.4. Region1 sub formulation class
+//PART 1.5. IAPWS-Region1 formulation struct
 //---------------------------------------------------------------------------------
-class Region1: IAPWS{
+struct Region1{
 private:
+	//state property
+	double p,T; // pressure & temperature 
+	double quality = 0.0; // vapour fraction 
 	//intermediate properties
 	double pi,tau; 
 	//derivatives of intermediate properties
@@ -1029,20 +740,8 @@ private:
 	double[34][3] table_2_2=[/*[I],[J],[n]]*/ [0,0,0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,3,3,3,4,4,4,5,8,8,21,23,29,30,31,32], [-2,-1,0,1,2,3,4,5,-9,-7,-1,0,1,3,-3,0,1,3,17,-4,0,6,-5,-2,10,-8,-11,-6,-29,-31,-38,-39,-40,-41], [1.463297121316700E-01,-8.454818716911400E-01,-3.756360367204000E+00,3.385516916838500E+00,-9.579196338787200E-01,1.577203851322800E-01,-1.661641719950100E-02,8.121462998356800E-04,2.831908012380400E-04,-6.070630156587400E-04,-1.899006821841900E-02,-3.252974877050500E-02,-2.184171717541400E-02,-5.283835796993000E-05,-4.718432107326700E-04,-3.000178079302600E-04,4.766139390698700E-05,-4.414184533084600E-06,-7.269499629759400E-16,-3.167964484505400E-05,-2.827079798531200E-06,-8.520512812010300E-10,-2.242528190800000E-06,-6.517122289560100E-07,-1.434172993792400E-13,-4.051699686011700E-07,-1.273430174164100E-09,-1.742487123063400E-10,-6.876213129553100E-19,1.447830782852100E-20,2.633578166279500E-23,-1.194762264007100E-23,1.822809458140400E-24,-9.353708729245800E-26]];
 
 	this(double _p, double _T, double _quality){
-	super(_p,_T,_quality);
+	p = _p; T = _T; quality = _quality;
 	init;
-	SpecificVolume; 
-	SpecificEnthalpy; 
-	rho=1/v; 
-	SpecificInternalEnergy;
-	SpecificEntropy; 
-	SpecificIsobaricHeatCapacity; 
-	SpecificIsohoricHeatCapacity;
-	SoundSpeed; 
-	IsobaricCubicExpansionCoefficient;
-	IsothermalCompressibility; 
-	DynamicViscosity;
-	ThermalConductivity;
 	}
 
 	void init(){
@@ -1072,50 +771,283 @@ private:
 public:
 	//table 2.3 
 	double SpecificVolume(){
-		v = R*T/p*pi*gamma_pi;
-		return v;
+		return R*T/p*pi*gamma_pi;
 	} 
 	double SpecificEnthalpy(){
-		h = tau*gamma_tau*R*T;
-		return h;
+		return tau*gamma_tau*R*T;
 	}  
 	double SpecificInternalEnergy(){
-		u = SpecificEnthalpy - SpecificVolume*p;
-		return u;
+		return SpecificEnthalpy - SpecificVolume*p;
 	} 
 	double SpecificEntropy(){
-		s = (tau*gamma_tau-gamma)*R;
-		return s;
+		return (tau*gamma_tau-gamma)*R;
 	}  
 	double SpecificIsobaricHeatCapacity(){
-		Cp = (-1*tau^^2*gamma_tautau)*R;
-		return Cp;
+		return (-1*tau^^2*gamma_tautau)*R;
 	} 
 	double SpecificIsohoricHeatCapacity(){
-		Cv = SpecificIsobaricHeatCapacity
+		return SpecificIsobaricHeatCapacity
 		+((gamma_pi-tau*gamma_pitau)^^2/gamma_pipi)*R;
-		return Cv;
 	}
 	double SoundSpeed(){
 		double _a,_b,_c,_d;
 		_a = (gamma_pi-tau*gamma_pitau)^^2/(tau^^2*gamma_tautau);
-		a = sqrt((gamma_pi^^2/(_a-gamma_pipi))*R*T);
-		return a;
+		return sqrt((gamma_pi^^2/(_a-gamma_pipi))*R*T);
 	}
 	double IsobaricCubicExpansionCoefficient(){
-		alpha_v = (1-tau*gamma_pitau/gamma_pi)/T;
-		return alpha_v;
+		return (1-tau*gamma_pitau/gamma_pi)/T;
 	}
 	double IsothermalCompressibility(){
-		kappa_T = (-1*pi*gamma_pipi/gamma_pi)/p;
-		return kappa_T;
+		return (-1*pi*gamma_pipi/gamma_pi)/p;
 	}
-}//end class Region1
+}//end struct Region1
 
-//function to validate data during development of the code 
-void main(){
-	IAPWS case1= new IAPWS(3e6,500,0);
-	case1.update_thermo;
-	writefln("%.9e %.9e %.9e %.9e %.9e %.9e %.9e %.9e %.9e", case1.v,case1.h,case1.u,
-		case1.s,case1.Cp,case1.Cv,case1.a,case1.alpha_v,case1.kappa_T);	
-}
+//-------------------------------------------------------------------------------
+// PART 1.6. IAPWS base formulation class
+//-------------------------------------------------------------------------------
+
+class IAPWS{
+/*
+*	Unless specify, otherwise:
+*	Reference:
+*	 Wanger, W., & Kretzschmar, H.(2008). International Steam Tables.
+*	 Berlin, Heidelberg: Springer Berlin Heidelberg.
+*/
+protected:
+	//Thermodynamic properties:
+	double T; /// thermal temperature [K]
+	double p; /// pressure [Pa]
+	double quality; /// vapour quality (1: pure gas) [-] 
+	double u; /// specific internal energy [J/kg]
+	double h; /// specfic enthalpy [J/kg]
+	double s; /// specific entropy [J/K/kg]
+	double v; /// specific volume [m^^3/kg]
+	double rho; /// density [kg/m^^3] 
+	double Cp; /// specific isobaric heat capacity [J/K/kg]
+	double Cv; /// specific isochoric heat capacity [J/kg/K]
+	double a; /// sound speed [m/s]
+	double mu; /// dynamic viscosity [Pa.s]
+	double k; /// thermal conductivity [W/m/K]
+	double alpha_v; /// isobaric cubic expansion coefficient [1/K]
+	double kappa_T; /// isothermal compressibility [1/Pa]
+	
+	// a char representing region of state within IAPWS
+	char region; // e.g. '2': Formulation Region 2 of IAPWS
+
+	//tables for calculating dynamic viscosity:
+	double[4] table_3_1=[0.167752e-1,0.220462e-1,0.6366564e-2,-0.241605e-2];
+	double[3][21] table_3_2=[/*[I_i,J_i,n_i]*/ [0,0,0.520094],[0,1,0.850895e-1],[0,2,-0.108374e1],[0,3,-0.289555],[1,0,0.222531],/*5*/[1,1,0.999115],[1,2,1.88797],[1,3,0.126613e1],[1,5,0.120573],[2,0,-0.281378], [2,1,-0.906851],[2,2,-0.772479],[2,3,-0.489837],[2,4,-0.25704],[3,0,0.161913], [3,1,0.257399],[4,0,-0.325372e-1],[4,3,0.698452e-1],[5,4,0.872102e-2],[6,3,-0.435673e-2],[6,5,-0.593264e-3] ];
+	
+	//table for calculating thermal conductivity:
+	double[5] table_1=[2.443221E-03,1.323095000E-02,6.770357000E-03,-3.454586000E-03,4.096266000E-04];
+	double[6][5] table_2=[[1.60397357,-0.646013523,0.111443906,0.102997357,-0.0504123634,0.00609859258], [2.33771842,-2.78843778,1.53616167,-0.463045512,0.0832827019,-0.00719201245], [2.19650529,-4.54580785,3.55777244,-1.40944978,0.275418278,-0.0205938816], [-1.21051378,1.60812989,-0.621178141,0.0716373224,0,0], [-2.7203370,4.57586331,-3.18369245,1.1168348,-0.19268305,0.012913842]];
+	double[5][6] table_6=[[6.53786807199516,6.52717759281799,5.35500529896124,1.55225959906681,1.11999926419994], [-5.61149954923348,-6.30816983387575,-3.96415689925446,0.464621290821181,0.595748562571649], [3.39624167361325,8.08379285492595,8.91990208918795,8.93237374861479,9.8895256507892], [-2.27492629730878,-9.82240510197603,-12.033872950579,-11.0321960061126,-10.325505114704], [10.2631854662709,12.1358413791395,9.19494865194302,6.1678099993336,4.66861294457414], [1.97815050331519,-5.54349664571295,-2.16866274479712,-0.965458722086812,-0.503243546373828]];
+
+private:
+	//determine which region the input (p,T) lies in
+	void set_region(){
+
+		//(p,T) lies in region 2
+		if(((0<T)&&(T<623.15))&&(p<=get_ps(T))||((623.15<=T&&T<=863.15)
+			&&(get_pb23(T)>p))||((863.15<=T)&&(T<=1073.15))){
+			region = '2';
+	} 
+		//(p,T) lies in region 5
+		else if(1073.15<=T){
+			region = '5';
+		}
+		//(p,T) lies in region 3
+		else if((623.15<=T&&T<=863.15)&&(get_pb23(T)<=p)){
+			region = '3';
+		}
+		//(p,T) lies in region 1
+		else if((273.15<=T&&T<=623.15)&&(get_ps(T)<=p&&p<=100E6)){
+			region = '1';
+		}
+	}
+	void update_thermo(){
+		set_region;
+
+		//initialise an object of the corresponding region class 
+		//and proceed the calculation within that class
+		final switch (region) {
+			
+			case '2':
+			Region2 _IAPWS = Region2(p,T,quality);
+			u = _IAPWS.SpecificInternalEnergy;
+			h = _IAPWS.SpecificEnthalpy;
+			s = _IAPWS.SpecificEntropy;
+			v = _IAPWS.SpecificVolume;
+			rho = 1/v;
+			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			a = _IAPWS.SoundSpeed; 
+			mu = DynamicViscosity;
+			mu = ThermalConductivity;
+			alpha_v = _IAPWS.IsobaricCubicExpansionCoefficient;
+			kappa_T = _IAPWS.IsothermalCompressibility;
+			break;	 
+			
+			case '5':
+			Region5 _IAPWS = Region5(p,T,quality);
+			u = _IAPWS.SpecificInternalEnergy;
+			h = _IAPWS.SpecificEnthalpy;
+			s = _IAPWS.SpecificEntropy;
+			v = _IAPWS.SpecificVolume;
+			rho = 1/v;
+			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			a = _IAPWS.SoundSpeed; 
+			mu = DynamicViscosity;
+			mu = ThermalConductivity;
+			alpha_v = _IAPWS.IsobaricCubicExpansionCoefficient;
+			kappa_T = _IAPWS.IsothermalCompressibility;
+			break;
+			
+			case '3':
+			Region3 _IAPWS = Region3(p,T,quality);
+			u = _IAPWS.SpecificInternalEnergy;
+			h = _IAPWS.SpecificEnthalpy;
+			s = _IAPWS.SpecificEntropy;
+			v = _IAPWS.SpecificVolume;
+			rho = _IAPWS.rho;
+			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			a = _IAPWS.SoundSpeed; 
+			mu = DynamicViscosity;
+			mu = ThermalConductivity;
+			alpha_v = _IAPWS.IsobaricCubicExpansionCoefficient;
+			kappa_T = _IAPWS.IsothermalCompressibility;
+			break;
+
+			case '1':
+			Region1 _IAPWS = Region1(p,T,quality);
+			u = _IAPWS.SpecificInternalEnergy;
+			h = _IAPWS.SpecificEnthalpy;
+			s = _IAPWS.SpecificEntropy;
+			v = _IAPWS.SpecificVolume;
+			rho = 1/v;
+			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			a = _IAPWS.SoundSpeed; 
+			mu = DynamicViscosity;
+			mu = ThermalConductivity;
+			alpha_v = _IAPWS.IsobaricCubicExpansionCoefficient;
+			kappa_T = _IAPWS.IsothermalCompressibility;
+			break;
+		}
+	}
+
+public:
+	this(double _p, double _T, double _quality){
+		T = _T;p = _p; quality = _quality;
+		update_thermo;
+	}
+
+	~this(){}
+
+	//function to compute dynamic viscosity but not in IAPWS-IF97
+	double DynamicViscosity(){	
+		//intermediate properties
+		double delta=rho/rho_c;
+		double theta=T/T_c;
+		double psi_0,psi_1;
+		double sum=0;
+		
+		//eqn 3.2
+		for(int i=0;i<4;++i){
+			sum += table_3_1[i]*theta^^(-i);
+		}
+		psi_0 = theta^^0.5*(sum)^^-1;
+
+		//eqn 3.3
+		sum=0;
+		for(int i=0;i<21;++i){
+			sum += table_3_2[i][2]*(delta-1)^^(table_3_2[i][0])
+			*((theta^^-1-1)^^(table_3_2[i][1])); 
+		}
+		psi_1 = exp(delta*sum);
+
+		//eqn 3.1
+		return 1e-6*psi_0*psi_1;
+	}
+	
+	double ThermalConductivity(){
+	/*	
+	* contains everything implementing from IAPWS R15-11 for industrial use
+	* reference:
+	* 	IAPWS (2011). Release on the IAPWS Formulaiton 2011 for the Thermal 
+	*	Conductivity of Ordinary Water Substance,
+	* 	available at the IAPWS website http://www.iapws.org 
+	* 
+	* notice:  value of p, T, rho and mu is required to proceed this function;
+	*/
+	
+		//intermediate properties
+		double lambda_bar,lambda_0,lambda_1,lambda_2,dvdp_T,drhodp_T,zeta_T,
+		zeta_TR,xi,delta_x, y, Z;
+		///eqn 7 ~ eqn 13
+		double T_bar = T/T_c;
+		double p_bar = p/p_c;
+		double rho_bar = rho/rho_c;
+		double mu_bar = mu/mu_c;
+		double Cp_bar = Cp/R;
+		double kappa = Cp/Cv; 
+		///dummy sum container	
+		double sum=0;
+		double sum_1=0;
+
+		//eqn 16
+		for(int i=0;i<5;++i){sum += table_1[i]/(T_bar^^i);} 
+			lambda_0 = sqrt(T_bar)/sum;
+		//eqn 17
+		sum=0;
+		for(int i=0;i<5;++i){
+			for(int j=0;j<6;++j){sum_1 += table_2[i][j]*(rho_bar-1)^^j;}
+				sum += ((T_bar^^-1-1)^^i)*sum_1;sum_1=0;}
+			lambda_1 = exp(rho_bar*sum);	
+
+		/*
+		*lambda_2, critical enhancement of thermal conductivity
+		*	refer to http://www.twt.mpei.ac.ru/mcs/worksheets/iapws/wspTCPT.xmcd	
+		*	for more details
+		*/
+		if((Cp_bar<0)||(Cp_bar>1e13)){
+			Cp_bar = 1e13;Cp = Cp_bar*R;kappa = Cp/Cv;
+		}	
+		dvdp_T = -kappa_T*v;
+		drhodp_T = rho^^2*-dvdp_T; 
+		zeta_T = drhodp_T*p_c/rho_c;
+		///eqn 26
+		int _j=-1;
+		do{
+			if(rho_bar<=0.310559006){_j=0;}
+			if((0.310559006<rho_bar)&&(rho_bar<=0.776397516)){_j=1;}
+			if((0.776397516<rho_bar)&&(rho_bar<=1.242236025)){_j=2;}
+			if((1.242236025<rho_bar)&&(rho_bar<=1.863354037)){_j=3;}
+			if(rho_bar>1.863354037){_j=4;}
+			}while(_j==-1);
+			sum=0;for(int i=0;i<6;++i){sum += table_6[i][_j]*rho_bar^^i;}
+			zeta_TR = 1/sum; 
+		///eqn 23
+		delta_x = rho_bar*(zeta_T-zeta_TR*1.5/T_bar); 
+		if(delta_x<0){delta_x=0;}
+		///eqn 22
+		xi = 0.13*(delta_x/0.06)^^(0.63/1.239); 
+		if((xi<0)||(xi>1e13)){xi=1e13;}
+		///eqn 20
+		y = xi/0.4;
+		///eqn 19
+		if(y<1.2e-7){Z = 0;}
+		else{Z = (2/PI/y)*((1-1/kappa)*atan(y)+y/kappa
+			-(1-exp(-1/(1/y+y^^2/3/(rho_bar^^2)))));}
+		///eqn 18 
+		lambda_2 = 177.8514*rho_bar*Cp_bar*T_bar*Z/mu_bar;
+		
+		//eqn 15
+		lambda_bar = lambda_0*lambda_1+lambda_2;
+		//eqn 10
+		return lambda_bar * k_c;
+	} // end ThermalConductivity   
+} // end class IAPWS
+
