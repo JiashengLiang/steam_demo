@@ -849,10 +849,11 @@ private:
 	void set_region(){
 
 		//(p,T) lies in region 2
-		if(((0<T)&&(T<623.15))&&(p<=get_ps(T))||((623.15<=T&&T<=863.15)
-			&&(get_pb23(T)>p))||((863.15<=T)&&(T<=1073.15))){
+		if((((0<T)&&(T<623.15))&&(p<=get_ps(T))||((623.15<=T&&T<=863.15)
+			&&(get_pb23(T)>p))||((863.15<=T)&&(T<=1073.15)))
+			&&quality==1.0){
 			region = '2';
-	} 
+		} 
 		//(p,T) lies in region 5
 		else if(1073.15<=T){
 			region = '5';
@@ -862,8 +863,16 @@ private:
 			region = '3';
 		}
 		//(p,T) lies in region 1
-		else if((273.15<=T&&T<=623.15)&&(get_ps(T)<=p&&p<=100E6)){
+		else if(((273.15<=T&&T<=623.15)&&(get_ps(T)<=p&&p<=100E6))
+				&& quality==0){
 			region = '1';
+		}
+		else{
+			string msg;
+			msg ~= format("Warning in function: %s:\n", __FUNCTION__);
+			msg ~= format("    Input state is out of the valid range of IAPWS formulations of state.\n"); 
+			msg ~= "  Supplied Q:" ~ Q.toString();
+			writeln(msg);
 		}
 	}
 	void update_thermo(){
@@ -1076,14 +1085,86 @@ public:
 
 	override void update_thermo_from_pT(GasState Q) const
 	{
-		IAPWS _Q = new IAPWS(Q.p, Q.Ttr, Q.quality);
-		_Q.update_thermo;
-		Q.rho = _Q.rho;
-		Q.a = _Q.a;
-		Q.u = _Q.u;
-		Q.mu = _Q.mu;
-		Q.k = _Q.k;
-	}
+		
+		if(Q.quality>0 && Q.quality<1.0)
+		{
+			string msg;
+			//tolerance from saturation state
+			immutable SATURATION_TOL = 0.01;
+			//distance to the closest saturation state 
+			double satoff_p = Q.p - get_ps(Q.Ttr);
+			double satoff_T = Q.Ttr - get_Ts(Q);
+			double dis_satoff = satoff_T*satoff_p/sqrt(satoff_T^^2 + satoff_p^^2);
+			
+			if(dis_satoff <= SATURATION_TOL)
+			{
+				msg ~= format("Warning in function: %s:\n", __FUNCTION__);
+				msg ~= format("    Input state is a liquid-vapour mixture state.\n"); 
+				msg ~= "  Supplied Q:" ~ Q.toString();	
+			}
+			else
+			{
+				msg ~= format("Warning in function: %s:\n", __FUNCTION__);
+				msg ~= format("    Input state is a liquid-vapour mixture state.\n");
+				msg ~= format("    The input state is away from the closest saturation 
+									pressure-temperature point by: %g\n", dis_satoff);
+				msg ~= format("    Which is larger than the tolerance (%g)\n",SATURATION_TOL);
+				msg ~= "  Supplied Q:" ~ Q.toString();
+				msg ~= format("    The input pressure and temperature will be reset
+										with the closest saturated value.\n"); 
+				writeln(msg);
+
+			}
+			writeln(msg);
+
+			//reset the value of pressure and temperature to be consistent
+			//with the saturation value in IAPWS model.
+			if(satoff_p>0)
+			{
+				Q.Ttr = Q.Ttr + dis_satoff^^2/satoff_T;
+				Q.p = Q.p - dis_satoff^^2/satoff_p;
+			}
+			else
+			{
+				Q.Ttr = Q.Ttr - dis_satoff^^2/satoff_T;
+				Q.p = Q.p + dis_satoff^^2/satoff_p;
+			}
+
+			IAPWS _Q = new IAPWS(Q.p, Q.Ttr, Q.quality);
+			if(_Q.region == '2' && Q.quality>=0.95)
+			{//meta-stable state in IAPWS-region2
+				Q.rho = _Q.rho;
+				Q.a = _Q.a;
+				Q.u = _Q.u;
+				Q.mu = _Q.mu;
+				Q.k = _Q.k				
+			}
+			else
+			{
+				//the properties of mixture state are calculated based on the 
+				//vapour fraction and the corresponding values of that property
+				// in liquid and vapour phase respectively
+				//saturated liquid state
+				IAPWS _Q_l = new IAPWS(Q.p, Q.Ttr, 0);
+				//saturated vapour state
+				IAPWS _Q_v = new IAPWS(Q.p, Q.Ttr, 1.0);
+				Q.rho = (_Q_l.rho - _Q_v.rho)*Q.quality + _Q_v.rho;
+				Q.a = (_Q_l.a - _Q_v.a)*Q.quality + _Q_v.a;
+				Q.u = (_Q_l.u - _Q_v.u)*Q.quality + _Q_v.u;
+				Q.mu = (_Q_l.mu - _Q_v.mu)*Q.quality + _Q_v.mu;
+				Q.k = (_Q_l.k - _Q_v.k)*Q.quality + _Q_v.k;
+			}			
+		}// end if(Q.quality>0 && Q.quality<1.0)	
+		else
+		{
+			IAPWS _Q = new IAPWS(Q.p, Q.Ttr, Q.quality);
+			Q.rho = _Q.rho;
+			Q.a = _Q.a;
+			Q.u = _Q.u;
+			Q.mu = _Q.mu;
+			Q.k = _Q.k
+		}
+	}//end void 
 
 	override void update_thermo_from_rhoe(GasState Q) const
 /**/{
@@ -1117,7 +1198,7 @@ public:
     // equation of state with some dummy values for pressure
     // and thermal temperature.
     Q.p = 1.0; // [Pa] 
-    Q.Ttr = 274; // [k] 
+    Q.Ttr = 273.15; // [k] 
     gmodel.update_thermo_from_pT(Q);
     
     u_old = Q.u;
