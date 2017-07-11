@@ -21,6 +21,7 @@
 
  import std.stdio;
  import std.math;
+ import std.string;
 
 //specific steam constants:
 /**/immutable double R=461.526; /// gas constant[J/kg/K]
@@ -244,7 +245,7 @@ public:
 	double SpecificIsobaricHeatCapacity(){
 		return -(tau^^2)*(gamma_o_tautau+gamma_r_tautau)*R;
 	} 
-	double SpecificIsohoricHeatCapacity(){
+	double SpecificIsochoricHeatCapacity(){
 		return SpecificIsobaricHeatCapacity
 		-(((1+pi*gamma_r_pi-tau*pi*gamma_r_pitau)^^2)/(1-pi^^2*gamma_r_pipi))*R;
 	}
@@ -371,7 +372,7 @@ public:
 	double SpecificIsobaricHeatCapacity(){
 		return -(tau^^2)*(gamma_o_tautau+gamma_r_tautau)*R;
 	} 
-	double SpecificIsohoricHeatCapacity(){
+	double SpecificIsochoricHeatCapacity(){
 		return SpecificIsobaricHeatCapacity
 		-(((1+pi*gamma_r_pi-tau*pi*gamma_r_pitau)^^2)/(1-pi^^2*gamma_r_pipi))*R;
 	}
@@ -703,7 +704,7 @@ public:
 		return R*(-tau^^2*phi_tautau+((delta*phi_delta-delta*tau*phi_deltatau)^^2)
 			/(2*delta*phi_delta+delta^^2*phi_deltadelta));
 	}
-	double SpecificIsohoricHeatCapacity(){
+	double SpecificIsochoricHeatCapacity(){
 		return R*(-tau^^2*phi_tautau);
 	}
 	double SoundSpeed(){
@@ -786,7 +787,7 @@ public:
 	double SpecificIsobaricHeatCapacity(){
 		return (-1*tau^^2*gamma_tautau)*R;
 	} 
-	double SpecificIsohoricHeatCapacity(){
+	double SpecificIsochoricHeatCapacity(){
 		return SpecificIsobaricHeatCapacity
 		+((gamma_pi-tau*gamma_pitau)^^2/gamma_pipi)*R;
 	}
@@ -814,7 +815,7 @@ class IAPWS{
 *	 Wanger, W., & Kretzschmar, H.(2008). International Steam Tables.
 *	 Berlin, Heidelberg: Springer Berlin Heidelberg.
 */
-protected:
+private:
 	//Thermodynamic properties:
 	double T; /// thermal temperature [K]
 	double p; /// pressure [Pa]
@@ -833,7 +834,11 @@ protected:
 	double kappa_T; /// isothermal compressibility [1/Pa]
 	
 	// a char representing region of state within IAPWS
-	char region; // e.g. '2': Formulation Region 2 of IAPWS
+	string region; // e.g. '2': Formulation Region 2 of IAPWS
+	// distance from the input p-T to the closest saturation point 
+	double dis_satoff;
+	//tolerance for the distance to the closest saturation point 
+	immutable SATURATION_TOL = 0.01;
 
 	//tables for calculating dynamic viscosity:
 	double[4] table_3_1=[0.167752e-1,0.220462e-1,0.6366564e-2,-0.241605e-2];
@@ -844,35 +849,58 @@ protected:
 	double[6][5] table_2=[[1.60397357,-0.646013523,0.111443906,0.102997357,-0.0504123634,0.00609859258], [2.33771842,-2.78843778,1.53616167,-0.463045512,0.0832827019,-0.00719201245], [2.19650529,-4.54580785,3.55777244,-1.40944978,0.275418278,-0.0205938816], [-1.21051378,1.60812989,-0.621178141,0.0716373224,0,0], [-2.7203370,4.57586331,-3.18369245,1.1168348,-0.19268305,0.012913842]];
 	double[5][6] table_6=[[6.53786807199516,6.52717759281799,5.35500529896124,1.55225959906681,1.11999926419994], [-5.61149954923348,-6.30816983387575,-3.96415689925446,0.464621290821181,0.595748562571649], [3.39624167361325,8.08379285492595,8.91990208918795,8.93237374861479,9.8895256507892], [-2.27492629730878,-9.82240510197603,-12.033872950579,-11.0321960061126,-10.325505114704], [10.2631854662709,12.1358413791395,9.19494865194302,6.1678099993336,4.66861294457414], [1.97815050331519,-5.54349664571295,-2.16866274479712,-0.965458722086812,-0.503243546373828]];
 
-private:
 	//determine which region the input (p,T) lies in
 	void set_region(){
 
 		//(p,T) lies in region 2
-		if((((0<T)&&(T<623.15))&&(p<=get_ps(T))||((623.15<=T&&T<=863.15)
-			&&(get_pb23(T)>p))||((863.15<=T)&&(T<=1073.15)))
-			&&quality==1.0){
-			region = '2';
+		if(((0<T)&&(T<623.15))&&(p<get_ps(T))||((623.15<=T&&T<=863.15)
+			&&(get_pb23(T)>p))||((863.15<=T)&&(T<=1073.15))){
+			if(quality==1.0)
+			{
+				region = "2";
+			}
+			else if(quality==0)
+			{
+				//input p-T is in region 2, but user actual want
+				//p-T in region 1
+				region = "1";
+				//reset p-T value
+				sat_reset_pT; 	
+			}
 		} 
 		//(p,T) lies in region 5
-		else if(1073.15<=T){
-			region = '5';
+		else if((1073.15<=T && T<=2273.15) && p<=50e6){
+			region = "5";
 		}
 		//(p,T) lies in region 3
 		else if((623.15<=T&&T<=863.15)&&(get_pb23(T)<=p)){
-			region = '3';
+			if(quality>0 && quality<1.0) 
+			{
+				region = "3m"; //liquid-vapour mixture 
+			}
+			else
+			{
+				region = "3"; 
+			}
 		}
 		//(p,T) lies in region 1
-		else if(((273.15<=T&&T<=623.15)&&(get_ps(T)<=p&&p<=100E6))
-				&& quality==0){
-			region = '1';
-		}
-		else{
-			string msg;
-			msg ~= format("Warning in function: %s:\n", __FUNCTION__);
-			msg ~= format("    Input state is out of the valid range of IAPWS formulations of state.\n"); 
-			msg ~= "  Supplied Q:" ~ Q.toString();
-			writeln(msg);
+		else if(((273.15<=T&&T<=623.15)&&(get_ps(T)<=p&&p<=100E6))){
+			if(quality==0)
+			{
+				region = "1";	
+			}
+			else if(0<quality && quality<1.0)
+			{
+				region = "12m"; //mixture state beside region 1&2
+			}
+			else if(quality==1.0)
+			{
+				//input p-T is in region1, but user actual want
+				//p-T in region 2
+				region = "2";
+				//reset input p-T
+				sat_reset_pT;
+			}
 		}
 	}
 	void update_thermo(){
@@ -880,9 +908,9 @@ private:
 
 		//initialise an object of the corresponding region class 
 		//and proceed the calculation within that class
-		final switch (region) {
+		switch (region) {
 			
-			case '2':
+			case "2":
 			Region2 _IAPWS = Region2(p,T,quality);
 			u = _IAPWS.SpecificInternalEnergy;
 			h = _IAPWS.SpecificEnthalpy;
@@ -890,7 +918,7 @@ private:
 			v = _IAPWS.SpecificVolume;
 			rho = 1/v;
 			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
-			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsochoricHeatCapacity; 
 			a = _IAPWS.SoundSpeed; 
 			mu = DynamicViscosity;
 			mu = ThermalConductivity;
@@ -898,7 +926,7 @@ private:
 			kappa_T = _IAPWS.IsothermalCompressibility;
 			break;	 
 			
-			case '5':
+			case "5":
 			Region5 _IAPWS = Region5(p,T,quality);
 			u = _IAPWS.SpecificInternalEnergy;
 			h = _IAPWS.SpecificEnthalpy;
@@ -906,7 +934,7 @@ private:
 			v = _IAPWS.SpecificVolume;
 			rho = 1/v;
 			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
-			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsochoricHeatCapacity; 
 			a = _IAPWS.SoundSpeed; 
 			mu = DynamicViscosity;
 			mu = ThermalConductivity;
@@ -914,7 +942,7 @@ private:
 			kappa_T = _IAPWS.IsothermalCompressibility;
 			break;
 			
-			case '3':
+			case "3":
 			Region3 _IAPWS = Region3(p,T,quality);
 			u = _IAPWS.SpecificInternalEnergy;
 			h = _IAPWS.SpecificEnthalpy;
@@ -922,7 +950,7 @@ private:
 			v = _IAPWS.SpecificVolume;
 			rho = _IAPWS.rho;
 			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
-			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsochoricHeatCapacity; 
 			a = _IAPWS.SoundSpeed; 
 			mu = DynamicViscosity;
 			mu = ThermalConductivity;
@@ -930,7 +958,7 @@ private:
 			kappa_T = _IAPWS.IsothermalCompressibility;
 			break;
 
-			case '1':
+			case "1":
 			Region1 _IAPWS = Region1(p,T,quality);
 			u = _IAPWS.SpecificInternalEnergy;
 			h = _IAPWS.SpecificEnthalpy;
@@ -938,15 +966,100 @@ private:
 			v = _IAPWS.SpecificVolume;
 			rho = 1/v;
 			Cp = _IAPWS.SpecificIsobaricHeatCapacity; 
-			Cv = _IAPWS.SpecificIsohoricHeatCapacity; 
+			Cv = _IAPWS.SpecificIsochoricHeatCapacity; 
 			a = _IAPWS.SoundSpeed; 
 			mu = DynamicViscosity;
 			mu = ThermalConductivity;
 			alpha_v = _IAPWS.IsobaricCubicExpansionCoefficient;
 			kappa_T = _IAPWS.IsothermalCompressibility;
 			break;
+
+			case "3m":
+			sat_reset_pT; //reset input p-T to more accurate values
+			Region3 _IAPWS = Region3(p,T,quality);
+			u = quality * _IAPWS.SpecificInternalEnergy;
+			h = quality * _IAPWS.SpecificEnthalpy;
+			s = quality * _IAPWS.SpecificEntropy;
+			v = quality * _IAPWS.SpecificVolume;
+			rho = 1/v;
+			Cp = quality * _IAPWS.SpecificIsobaricHeatCapacity; 
+			Cv = quality * _IAPWS.SpecificIsochoricHeatCapacity; 
+			a = quality * _IAPWS.SoundSpeed; 
+			//not sure how to calculate this using vapour fraction
+			mu = DynamicViscosity;
+			mu = ThermalConductivity;
+			alpha_v = _IAPWS.IsobaricCubicExpansionCoefficient;
+			kappa_T = _IAPWS.IsothermalCompressibility;
+			break;
+
+			case "12m":
+			sat_reset_pT; //reset input p-T to more accurate values
+			Region1 _IAPWS_l = Region1(p,T,0);
+			Region2 _IAPWS_v = Region2(p,T,1.0);
+			u = quality * (_IAPWS_v.SpecificInternalEnergy
+				- _IAPWS_l.SpecificInternalEnergy) + _IAPWS_l.SpecificInternalEnergy;
+		
+			h = quality * (_IAPWS_v.SpecificEnthalpy
+				- _IAPWS_l.SpecificEnthalpy) + _IAPWS_l.SpecificEnthalpy;
+			
+			s = quality * (_IAPWS_v.SpecificEntropy 
+				- _IAPWS_l.SpecificEntropy) + _IAPWS_l.SpecificEntropy;
+			
+			v = quality * (_IAPWS_v.SpecificVolume - _IAPWS_l.SpecificVolume)
+				+ _IAPWS_l.SpecificVolume;
+			rho = 1/v;
+			Cp = quality * (_IAPWS_v.SpecificIsobaricHeatCapacity
+				- _IAPWS_l.SpecificIsobaricHeatCapacity)
+				+ _IAPWS_l.SpecificIsobaricHeatCapacity;
+
+			Cv = quality * (_IAPWS_v.SpecificIsochoricHeatCapacity 
+				- _IAPWS_l.SpecificIsochoricHeatCapacity)
+				+ _IAPWS_l.SpecificIsochoricHeatCapacity; 
+			
+			a = quality * (_IAPWS_v.SoundSpeed - _IAPWS_l.SoundSpeed)
+				+ _IAPWS_l.SoundSpeed; 
+
+			//not sure how to calculate this using vapour fraction
+			mu = DynamicViscosity;
+			mu = ThermalConductivity;
+			alpha_v = _IAPWS_v.IsobaricCubicExpansionCoefficient;
+			kappa_T = _IAPWS_v.IsothermalCompressibility;
+			break;
+
+			default:
+			string msg;
+			msg ~= format("Warning in function: %s:\n", __FUNCTION__);
+			msg ~= format("    Input state is out of the valid range of IAPWS formulations of state.\n"); 
+			writeln(msg);
+			break;
+
+		}//end switch 
+	}// end update_thermo
+	
+	void sat_reset_pT()
+	{
+		//activated only when input state is mixture
+		
+		//distance to the closest saturation state in p-direction 
+		double satoff_p = p - get_ps(T);
+		//distance to the closest saturation state in T-direction 
+		double satoff_T = T- get_Ts(p);
+		
+		dis_satoff = satoff_T*satoff_p/sqrt(satoff_T^^2 + satoff_p^^2);
+		
+		//reset the value of pressure and temperature to be consistent
+		//with the saturation value in IAPWS model.
+		if(satoff_p>0)
+		{
+			T = T + dis_satoff^^2/satoff_T;
+			p = p - dis_satoff^^2/satoff_p;
 		}
-	}
+		else
+		{
+			T = T - dis_satoff^^2/satoff_T;
+			p = p + dis_satoff^^2/satoff_p;
+		}
+	} 
 
 public:
 	this(double _p, double _T, double _quality){
@@ -957,6 +1070,8 @@ public:
 	~this(){}
 
 	//function to compute dynamic viscosity but not in IAPWS-IF97
+	//parameter: rho, T
+	//valid in: 273.15K <= T <= 1173.15K and p <= 100 MPa
 	double DynamicViscosity(){	
 		//intermediate properties
 		double delta=rho/rho_c;
@@ -990,7 +1105,8 @@ public:
 	*	Conductivity of Ordinary Water Substance,
 	* 	available at the IAPWS website http://www.iapws.org 
 	* 
-	* notice:  value of p, T, rho and mu is required to proceed this function;
+	* parameters: p, T, rho, mu
+	* valid in: 273.15K <= T <= 1173.15K and p <= 100 MPa;
 	*/
 	
 		//intermediate properties
@@ -1075,28 +1191,17 @@ public:
 		_mol_masses ~= 0.018015257;// value from International Steam Table (Wanger W.,2008)
 		create_species_reverse_lookup(); 
 	}
-	
-	this(lua_State *L){
-/**/this();		
-	}
 
 	override string toString() const
 /**/{}
 
 	override void update_thermo_from_pT(GasState Q) const
 	{
-		
+		IAPWS _IAPWS = new IAPWS(Q.p, Q.Ttr,Q.quality);
 		if(Q.quality>0 && Q.quality<1.0)
 		{
 			string msg;
-			//tolerance from saturation state
-			immutable SATURATION_TOL = 0.01;
-			//distance to the closest saturation state 
-			double satoff_p = Q.p - get_ps(Q.Ttr);
-			double satoff_T = Q.Ttr - get_Ts(Q);
-			double dis_satoff = satoff_T*satoff_p/sqrt(satoff_T^^2 + satoff_p^^2);
-			
-			if(dis_satoff <= SATURATION_TOL)
+			if(_IAPWS.dis_satoff <= _IAPWS.SATURATION_TOL)
 			{
 				msg ~= format("Warning in function: %s:\n", __FUNCTION__);
 				msg ~= format("    Input state is a liquid-vapour mixture state.\n"); 
@@ -1107,63 +1212,21 @@ public:
 				msg ~= format("Warning in function: %s:\n", __FUNCTION__);
 				msg ~= format("    Input state is a liquid-vapour mixture state.\n");
 				msg ~= format("    The input state is away from the closest saturation 
-									pressure-temperature point by: %g\n", dis_satoff);
-				msg ~= format("    Which is larger than the tolerance (%g)\n",SATURATION_TOL);
+									pressure-temperature point by: %g\n", _IAPWS.dis_satoff);
+				msg ~= format("    Which is larger than the tolerance (%g)\n",_IAPWS.SATURATION_TOL);
 				msg ~= "  Supplied Q:" ~ Q.toString();
-				msg ~= format("    The input pressure and temperature will be reset
-										with the closest saturated value.\n"); 
-				writeln(msg);
+			}
+			msg ~= format("    Reset inputs to saturation value: pressure:%g, temperature:%g\n",
+								_IAPWS.p,_IAPWS.T);
+			writeln(msg);	
+		}//end if(Q.quality>0 && Q.quality<1.0) 
+		
+		Q.rho = _IAPWS.rho;
+		Q.a = _IAPWS.a;
+		Q.u = _IAPWS.u;
+		//Q.mu = _IAPWS.mu;
+		//Q.k = _IAPWS.k;
 
-			}
-			writeln(msg);
-
-			//reset the value of pressure and temperature to be consistent
-			//with the saturation value in IAPWS model.
-			if(satoff_p>0)
-			{
-				Q.Ttr = Q.Ttr + dis_satoff^^2/satoff_T;
-				Q.p = Q.p - dis_satoff^^2/satoff_p;
-			}
-			else
-			{
-				Q.Ttr = Q.Ttr - dis_satoff^^2/satoff_T;
-				Q.p = Q.p + dis_satoff^^2/satoff_p;
-			}
-
-			IAPWS _Q = new IAPWS(Q.p, Q.Ttr, Q.quality);
-			if(_Q.region == '2' && Q.quality>=0.95)
-			{//meta-stable state in IAPWS-region2
-				Q.rho = _Q.rho;
-				Q.a = _Q.a;
-				Q.u = _Q.u;
-				Q.mu = _Q.mu;
-				Q.k = _Q.k				
-			}
-			else
-			{
-				//the properties of mixture state are calculated based on the 
-				//vapour fraction and the corresponding values of that property
-				// in liquid and vapour phase respectively
-				//saturated liquid state
-				IAPWS _Q_l = new IAPWS(Q.p, Q.Ttr, 0);
-				//saturated vapour state
-				IAPWS _Q_v = new IAPWS(Q.p, Q.Ttr, 1.0);
-				Q.rho = (_Q_l.rho - _Q_v.rho)*Q.quality + _Q_v.rho;
-				Q.a = (_Q_l.a - _Q_v.a)*Q.quality + _Q_v.a;
-				Q.u = (_Q_l.u - _Q_v.u)*Q.quality + _Q_v.u;
-				Q.mu = (_Q_l.mu - _Q_v.mu)*Q.quality + _Q_v.mu;
-				Q.k = (_Q_l.k - _Q_v.k)*Q.quality + _Q_v.k;
-			}			
-		}// end if(Q.quality>0 && Q.quality<1.0)	
-		else
-		{
-			IAPWS _Q = new IAPWS(Q.p, Q.Ttr, Q.quality);
-			Q.rho = _Q.rho;
-			Q.a = _Q.a;
-			Q.u = _Q.u;
-			Q.mu = _Q.mu;
-			Q.k = _Q.k
-		}
 	}//end void 
 
 	override void update_thermo_from_rhoe(GasState Q) const
