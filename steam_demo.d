@@ -23,8 +23,8 @@
  import std.math;
  import std.string;
 
-//specific steam constants:
-/**/immutable double R=461.526; /// gas constant[J/kg/K]
+//steam constants:
+/**/immutable double R=461.526; /// specific gas constant[J/kg/K]
 	immutable double rho_c=322; /// critical density [kg/m^^3]	
 	immutable double T_c=647.096; /// critical thermal temperature [K]
 	immutable double p_c=22.064e6; /// critical pressure [Pa]
@@ -1190,14 +1190,9 @@ public:
 		_species_names ~= "H2O";
 		_mol_masses ~= 0.018015257;// value from International Steam Table (Wanger W.,2008)
 		create_species_reverse_lookup(); 
-	}
 
-	override string toString() const
-/**/{}
-
-	override void update_thermo_from_pT(GasState Q) const
-	{
-		IAPWS _IAPWS = new IAPWS(Q.p, Q.Ttr,Q.quality);
+		//print out message when input state is a liquid-vapour mixture
+		/*
 		if(Q.quality>0 && Q.quality<1.0)
 		{
 			string msg;
@@ -1220,13 +1215,19 @@ public:
 								_IAPWS.p,_IAPWS.T);
 			writeln(msg);	
 		}//end if(Q.quality>0 && Q.quality<1.0) 
-		
+		*/
+	}
+
+	override string toString() const
+/**/{}
+
+	override void update_thermo_from_pT(GasState Q) const
+	{
 		Q.rho = _IAPWS.rho;
 		Q.a = _IAPWS.a;
 		Q.u = _IAPWS.u;
 		//Q.mu = _IAPWS.mu;
 		//Q.k = _IAPWS.k;
-
 	}//end void 
 
 	override void update_thermo_from_rhoe(GasState Q) const
@@ -1234,7 +1235,7 @@ public:
 	 //a guess of p & T is iterated on update_thermo_from_pT using 
 	 //the  Newton-Raphson method.
 
-	 double dp, p_old, p_new, T_old, T_new, dT;
+	double dp, p_old, p_new, T_old, T_new, dT;
     double dp_sign, dT_sign;
     double Cv_eff, R_eff, rho_old;
     double frho_old, fu_old, frho_new, fu_new;
@@ -1401,4 +1402,49 @@ public:
 	throw new Exception(msg);
     }
 	} // end update_thermo_from_rhoe
+
+	override void update_sound_speed(GasState Q) const
+	{
+		Q.a = _IAPWS.a;
+	}
+
+	override void update_trans_coeffs(GasState Q) const
+	{
+		Q.mu = _IAPWS.mu;
+		Q.k = _IAPWS.k;
+	}
+
+	override double dudT_const_v(in GasState Q) const
+    {
+		return _IAPWS.Cv;
+    }
+    override double dhdt_const_p(in GasState Q) const
+    {
+    	return _IAPWS.Cp;
+    }
+    override double dpdrho_const_T(in GasState Q) const
+    {
+    	//not sure what should be put here
+    	//using Newton's symmetric difference quotient?
+
+    }
+    override double gas_constant(in GasState Q) const
+    {
+    	return R;
+    }
+    override double internal_energy(in GasState Q) const
+    {
+    	return _IAPWS.u;
+    }
+    override double enthalpy(in GasState Q) const
+    {
+    	return _IAPWS.h;
+    }
+    override double entropy(in GasState Q) const
+    {
+    	return _IAPWS.s;
+    }
+
+private:
+	IAPWS _IAPWS = new IAPWS(Q.p, Q.Ttr, Q.quality);
 } // end class Steam
