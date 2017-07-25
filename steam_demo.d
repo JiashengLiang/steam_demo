@@ -506,7 +506,7 @@ private:
 		}
 
 		//determination of subregion, refer to table 2.101 for more details
-/**/	void get_subregion()
+		void get_subregion()
 		{
 		/*
 		*subregion boundaries can be obtained using the combination of 
@@ -910,7 +910,7 @@ private:
 		//and proceed the calculation within that class
 		switch (region) {
 			
-			case "2":
+/*1*/		case "2":
 			Region2 _IAPWS = Region2(p,T,quality);
 			u = _IAPWS.SpecificInternalEnergy;
 			h = _IAPWS.SpecificEnthalpy;
@@ -976,15 +976,30 @@ private:
 
 			case "3m":
 			sat_reset_pT; //reset input p-T to more accurate values
-			Region3 _IAPWS = Region3(p,T,quality);
-			u = quality * _IAPWS.SpecificInternalEnergy;
-			h = quality * _IAPWS.SpecificEnthalpy;
-			s = quality * _IAPWS.SpecificEntropy;
-			v = quality * _IAPWS.SpecificVolume;
+			Region3 _IAPWS_l = Region3(p,T,0);
+			Region3 _IAPWS_v = Region3(p,T,1.0);
+			u = quality * (_IAPWS_v.SpecificInternalEnergy
+				- _IAPWS_l.SpecificInternalEnergy) + _IAPWS_l.SpecificInternalEnergy;
+		
+			h = quality * (_IAPWS_v.SpecificEnthalpy
+				- _IAPWS_l.SpecificEnthalpy) + _IAPWS_l.SpecificEnthalpy;
+			
+			s = quality * (_IAPWS_v.SpecificEntropy 
+				- _IAPWS_l.SpecificEntropy) + _IAPWS_l.SpecificEntropy;
+			
+			v = quality * (_IAPWS_v.SpecificVolume - _IAPWS_l.SpecificVolume)
+				+ _IAPWS_l.SpecificVolume;
 			rho = 1/v;
-			Cp = quality * _IAPWS.SpecificIsobaricHeatCapacity; 
-			Cv = quality * _IAPWS.SpecificIsochoricHeatCapacity; 
-			a = quality * _IAPWS.SoundSpeed; 
+			Cp = quality * (_IAPWS_v.SpecificIsobaricHeatCapacity
+				- _IAPWS_l.SpecificIsobaricHeatCapacity)
+				+ _IAPWS_l.SpecificIsobaricHeatCapacity;
+
+			Cv = quality * (_IAPWS_v.SpecificIsochoricHeatCapacity 
+				- _IAPWS_l.SpecificIsochoricHeatCapacity)
+				+ _IAPWS_l.SpecificIsochoricHeatCapacity; 
+			
+			a = quality * (_IAPWS_v.SoundSpeed - _IAPWS_l.SoundSpeed)
+				+ _IAPWS_l.SoundSpeed;
 			//not sure how to calculate this using vapour fraction
 			mu = DynamicViscosity;
 			mu = ThermalConductivity;
@@ -1182,9 +1197,11 @@ public:
 //-----------------------------------------------------------------------------
 
 class Steam: GasModel{
+private:
+	IAPWS _IAPWS = new IAPWS(Q.p, Q.Ttr, Q.quality);
 public:
 	this(){
-/**/	// not sure I'm doing this correctly
+/*2*/	// not sure I'm doing this correctly
 		_n_species = 1;
 		_n_modes = 0;
 		_species_names ~= "H2O";
@@ -1219,19 +1236,20 @@ public:
 	}
 
 	override string toString() const
-/**/{}
+/*3*/{
+	}
 
 	override void update_thermo_from_pT(GasState Q) const
 	{
 		Q.rho = _IAPWS.rho;
 		Q.a = _IAPWS.a;
 		Q.u = _IAPWS.u;
-		//Q.mu = _IAPWS.mu;
-		//Q.k = _IAPWS.k;
-	}//end void 
+		Q.mu = _IAPWS.mu;
+		Q.k = _IAPWS.k;
+	}
 
 	override void update_thermo_from_rhoe(GasState Q) const
-/**/{
+/*4*/{
 	 //a guess of p & T is iterated on update_thermo_from_pT using 
 	 //the  Newton-Raphson method.
 
@@ -1282,7 +1300,7 @@ public:
     Cv_eff = (Q.u - u_old) / dT;
     // Now, get a better guess for the appropriate pressure and
     // thermal temperature.
-/**/p_old = R_eff * rho_given * T_old;    
+/*5*/p_old = R_eff * rho_given * T_old;    
     T_old = (u_given - Q.u)/Cv_eff + Q.Ttr;
 
     // Evaluate state variables using this guess.
@@ -1424,7 +1442,7 @@ public:
     }
     override double dpdrho_const_T(in GasState Q) const
     {
-    	//not sure what should be put here
+/*6*/  	//not sure what should be put here
     	//using Newton's symmetric difference quotient?
 
     }
@@ -1445,6 +1463,4 @@ public:
     	return _IAPWS.s;
     }
 
-private:
-	IAPWS _IAPWS = new IAPWS(Q.p, Q.Ttr, Q.quality);
 } // end class Steam
